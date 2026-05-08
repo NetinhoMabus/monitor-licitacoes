@@ -297,13 +297,15 @@ main{padding:2rem;max-width:1440px;margin:0 auto}
 
   <!-- INFOGRAPHIC -->
   <div class="info-card">
-    <div class="ctitle">Crescimento Semanal — Infográfico Comparativo</div>
-    <div class="info-weeks" id="infoWeeks">
-      <div style="font-family:var(--mono);font-size:.72rem;color:var(--tx3);padding:1rem">Salve snapshots para ver o infográfico de crescimento</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.75rem">
+      <div class="ctitle" style="margin:0">Crescimento Semanal — Valor de Contratos & Lucro Líquido</div>
+      <div style="display:flex;gap:1rem">
+        <div class="ileg"><div class="ileg-dot" style="background:#3b82f6"></div>Valor de Contratos</div>
+        <div class="ileg"><div class="ileg-dot" style="background:#10b981"></div>Lucro Líquido</div>
+      </div>
     </div>
-    <div class="info-legend">
-      <div class="ileg"><div class="ileg-dot" style="background:rgba(59,130,246,.6)"></div>Valor de Contratos</div>
-      <div class="ileg"><div class="ileg-dot" style="background:rgba(16,185,129,.7)"></div>Lucro Líquido</div>
+    <div id="infoWeeks" style="width:100%">
+      <div style="font-family:var(--mono);font-size:.72rem;color:var(--tx3);padding:1rem">Salve ao menos 1 snapshot para ver o infográfico de crescimento semanal</div>
     </div>
   </div>
 
@@ -466,6 +468,16 @@ const __SAVED_DATA__ = null; // MABUS_DATA_PLACEHOLDER
 
 // Inicializa: prefere localStorage (funciona no Cloudflare), fallback para dados embutidos
 (()=>{
+  // Teste de localStorage
+  try{
+    localStorage.setItem('__test__','1');
+    localStorage.removeItem('__test__');
+  }catch(e){
+    console.error('localStorage BLOQUEADO:', e);
+    // Mostra aviso após carregamento
+    setTimeout(()=>toast('⚠️ Armazenamento bloqueado — verifique configurações do Chrome'), 1500);
+  }
+
   try{
     const ls = localStorage.getItem(SK);
     if(ls){
@@ -473,15 +485,18 @@ const __SAVED_DATA__ = null; // MABUS_DATA_PLACEHOLDER
       S.fin = d.fin||{};
       S.snaps = d.snaps||[];
       if(d.weekOffset!==undefined) S.weekOffset = d.weekOffset;
+      console.log(`✓ Dados carregados do localStorage: ${Object.keys(S.fin).length} registros financeiros, ${S.snaps.length} snapshots`);
       return;
     }
-  }catch(e){}
+  }catch(e){ console.warn('Erro ao ler localStorage:', e); }
+
   // Fallback: dados embutidos (para uso via file://)
   try{
     if(__SAVED_DATA__){
       S.fin = __SAVED_DATA__.fin||{};
       S.snaps = __SAVED_DATA__.snaps||[];
       if(__SAVED_DATA__.weekOffset!==undefined) S.weekOffset = __SAVED_DATA__.weekOffset;
+      console.log('✓ Dados carregados do arquivo embutido');
     }
   }catch(e){}
 })();
@@ -724,47 +739,136 @@ function setKPI(id,val,prev,money){
 }
 
 // ═══════════════════════════════════════
-//  INFOGRAPHIC
+//  INFOGRAPHIC — SVG montanha
 // ═══════════════════════════════════════
 function renderInfoGraphic(){
   const el=document.getElementById('infoWeeks');
   const allSnaps=[...S.snaps];
-
-  // Add current week as preview
   const{ws,we}=getWeek(S.weekOffset);
-  const fmt=d=>d.toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit'});
   let curHom=0,curV=0,curL=0;
   for(const c of S.homCards){
     const fin=S.fin[c.id];
     if(fin?.dataHomolog){const d=new Date(fin.dataHomolog+'T12:00:00');if(d>=ws&&d<=we){curHom++;if(fin.vc&&fin.custo){const v=+fin.vc;curV+=v;curL+=v-+fin.custo-v*.07;}}}
   }
-
   const data=[...allSnaps,{wl:'Esta semana',hom:curHom,valor:curV,lucro:curL,_current:true}];
-  if(data.length<2){el.innerHTML='<div style="font-family:var(--mono);font-size:.72rem;color:var(--tx3);padding:1rem">Salve ao menos 1 snapshot para ver o infográfico de crescimento semanal</div>';return;}
+  if(data.length<2){
+    el.innerHTML='<div style="font-family:var(--mono);font-size:.72rem;color:var(--tx3);padding:1rem">Salve ao menos 1 snapshot para ver o infográfico de crescimento semanal</div>';
+    return;
+  }
 
+  const W=el.offsetWidth||800, H=180;
+  const PAD={top:20,right:24,bottom:48,left:56};
+  const cW=W-PAD.left-PAD.right, cH=H-PAD.top-PAD.bottom;
+  const n=data.length;
   const maxV=Math.max(...data.map(d=>d.valor),1);
   const maxL=Math.max(...data.map(d=>d.lucro),1);
-  const maxH=Math.max(...data.map(d=>d.hom),1);
+  const maxAll=Math.max(maxV,maxL);
 
-  el.innerHTML=data.map((d,i)=>{
-    const prev=i>0?data[i-1]:null;
-    const homDiff=prev?d.hom-prev.hom:0;
-    const trendCls=homDiff>0?'up':homDiff<0?'dn':'nu';
-    const trendTxt=homDiff>0?`▲ +${homDiff}`:homDiff<0?`▼ ${homDiff}`:'—';
-    const hV=Math.max((d.valor/maxV)*56,2);
-    const hL=Math.max((d.lucro/maxL)*56,2);
-    return `<div class="iw${d._current?' curr':''}">
-      <div class="iw-week">${d.wl}</div>
-      <div class="iw-bar-wrap">
-        <div class="iw-bar v" style="height:${hV}px" title="Contratos: ${fmtM(d.valor)}"></div>
-        <div class="iw-bar l" style="height:${hL}px" title="Lucro: ${fmtM(d.lucro)}"></div>
-      </div>
-      <div class="iw-hom">${d.hom}</div>
-      <div class="iw-val">${fmtM(d.valor)}</div>
-      <div class="iw-val">${fmtM(d.lucro)}</div>
-      <div class="iw-trend ${trendCls}">${prev?trendTxt:'base'}</div>
-    </div>`;
+  // X positions (evenly spaced)
+  const xPos=i=>PAD.left+(i/(n-1))*cW;
+  const yV=v=>PAD.top+cH-(v/maxAll)*cH;
+  const yL=v=>PAD.top+cH-(v/maxAll)*cH;
+
+  // Build smooth mountain path (cubic bezier)
+  function mountainPath(vals,yFn){
+    if(vals.length===1) return `M${PAD.left},${yFn(vals[0])}`;
+    let d=`M${xPos(0)},${yFn(vals[0])}`;
+    for(let i=1;i<vals.length;i++){
+      const x0=xPos(i-1),y0=yFn(vals[i-1]);
+      const x1=xPos(i),y1=yFn(vals[i]);
+      const cx=(x0+x1)/2;
+      d+=` C${cx},${y0} ${cx},${y1} ${x1},${y1}`;
+    }
+    return d;
+  }
+
+  function areaPath(vals,yFn){
+    const base=PAD.top+cH;
+    return mountainPath(vals,yFn)+` L${xPos(vals.length-1)},${base} L${xPos(0)},${base} Z`;
+  }
+
+  const vVals=data.map(d=>d.valor);
+  const lVals=data.map(d=>d.lucro);
+
+  // Y axis labels
+  const yTicks=[0,0.25,0.5,0.75,1].map(t=>({
+    y:PAD.top+cH-t*cH,
+    label:'R$'+(maxAll*t>=1000000?((maxAll*t)/1000000).toFixed(1)+'M':((maxAll*t)/1000).toFixed(0)+'k')
+  }));
+
+  // Grid lines
+  const gridLines=yTicks.map(t=>`<line x1="${PAD.left}" y1="${t.y}" x2="${W-PAD.right}" y2="${t.y}" stroke="#1e2d4a" stroke-width="1"/>`).join('');
+  const yLabels=yTicks.map(t=>`<text x="${PAD.left-6}" y="${t.y+4}" text-anchor="end" fill="#475569" font-size="9" font-family="DM Mono,monospace">${t.label}</text>`).join('');
+
+  // X labels + vertical markers
+  const xLabels=data.map((d,i)=>{
+    const x=xPos(i);
+    const isCurr=!!d._current;
+    return `
+      <line x1="${x}" y1="${PAD.top}" x2="${x}" y2="${PAD.top+cH}" stroke="${isCurr?'#3b82f6':'#1e2d4a'}" stroke-width="${isCurr?1.5:1}" stroke-dasharray="${isCurr?'':'3,3'}"/>
+      <text x="${x}" y="${H-6}" text-anchor="middle" fill="${isCurr?'#60a5fa':'#475569'}" font-size="9" font-family="DM Mono,monospace">${d.wl}</text>
+    `;
   }).join('');
+
+  // Peaks: dots + value labels
+  const vDots=data.map((d,i)=>{
+    const x=xPos(i),y=yV(d.valor);
+    const label=fmtM(d.valor);
+    const isCurr=!!d._current;
+    return `
+      <circle cx="${x}" cy="${y}" r="${isCurr?5:4}" fill="${isCurr?'#60a5fa':'#3b82f6'}" stroke="#0a0e1a" stroke-width="2"/>
+      <text x="${x}" y="${y-9}" text-anchor="middle" fill="#60a5fa" font-size="8.5" font-family="DM Mono,monospace" font-weight="bold">${label}</text>
+    `;
+  }).join('');
+
+  const lDots=data.map((d,i)=>{
+    const x=xPos(i),y=yL(d.lucro);
+    const label=fmtM(d.lucro);
+    const isCurr=!!d._current;
+    return `
+      <circle cx="${x}" cy="${y}" r="${isCurr?5:4}" fill="${isCurr?'#34d399':'#10b981'}" stroke="#0a0e1a" stroke-width="2"/>
+      <text x="${x}" y="${y-9}" text-anchor="middle" fill="#10b981" font-size="8.5" font-family="DM Mono,monospace">${label}</text>
+    `;
+  }).join('');
+
+  // Trend arrow between last two points
+  let trendBadge='';
+  if(data.length>=2){
+    const last=data[data.length-1],prev2=data[data.length-2];
+    const diff=last.valor-prev2.valor;
+    const pct=prev2.valor>0?((diff/prev2.valor)*100).toFixed(0):0;
+    const col=diff>=0?'#10b981':'#ef4444';
+    const arrow=diff>=0?'▲':'▼';
+    trendBadge=`<rect x="${W-PAD.right-80}" y="${PAD.top}" width="76" height="20" rx="4" fill="${diff>=0?'rgba(16,185,129,.15)':'rgba(239,68,68,.15)'}" stroke="${col}" stroke-width="1"/>
+    <text x="${W-PAD.right-42}" y="${PAD.top+13}" text-anchor="middle" fill="${col}" font-size="10" font-family="DM Mono,monospace" font-weight="bold">${arrow} ${Math.abs(pct)}% contratos</text>`;
+  }
+
+  el.innerHTML=`<svg width="100%" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="display:block">
+    <defs>
+      <linearGradient id="gradV" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#3b82f6" stop-opacity="0.4"/>
+        <stop offset="100%" stop-color="#3b82f6" stop-opacity="0.02"/>
+      </linearGradient>
+      <linearGradient id="gradL" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#10b981" stop-opacity="0.45"/>
+        <stop offset="100%" stop-color="#10b981" stop-opacity="0.02"/>
+      </linearGradient>
+    </defs>
+    ${gridLines}
+    ${xLabels}
+    ${yLabels}
+    <!-- Área contratos -->
+    <path d="${areaPath(vVals,yV)}" fill="url(#gradV)"/>
+    <!-- Linha contratos -->
+    <path d="${mountainPath(vVals,yV)}" fill="none" stroke="#3b82f6" stroke-width="2.5" stroke-linejoin="round"/>
+    <!-- Área lucro -->
+    <path d="${areaPath(lVals,yL)}" fill="url(#gradL)"/>
+    <!-- Linha lucro -->
+    <path d="${mountainPath(lVals,yL)}" fill="none" stroke="#10b981" stroke-width="2" stroke-linejoin="round"/>
+    ${vDots}
+    ${lDots}
+    ${trendBadge}
+  </svg>`;
 }
 
 // ═══════════════════════════════════════
@@ -1001,29 +1105,121 @@ function openPdf(){
 function closePdf(){document.getElementById('ovPdf').classList.remove('open');}
 
 function doPrint(){
-  const content=document.getElementById('pdfPrev').innerHTML;
+  const{ws,we}=getWeek(S.weekOffset);
+  const fmt=d=>d.toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit'});
+  const wl=`${fmt(ws)} a ${fmt(we)} de ${we.getFullYear()}`;
+
+  // Rebuild data fresh for print
+  let hom=0,vT=0,lT=0;
+  const rows=[];
+  for(const c of S.homCards){
+    const fin=S.fin[c.id];
+    if(fin?.dataHomolog){
+      const d=new Date(fin.dataHomolog+'T12:00:00');
+      if(d>=ws&&d<=we){
+        hom++;
+        let v=0,cu=0,imp=0,liq=0,marg='—';
+        if(fin.vc&&fin.custo){v=+fin.vc;cu=+fin.custo;imp=Math.round(v*.07);liq=v-cu-imp;marg=(liq/v*100).toFixed(1)+'%';vT+=v;lT+=liq;}
+        rows.push({title:c.title,v,cu,imp,liq,marg,src:fin.source,cotador:fin.cotador||'',lances:fin.lances||''});
+      }
+    }
+  }
+  const novas=S.acomp.filter(c=>{const ts=c.createdAt?new Date(c.createdAt*1000):null;return ts&&ts>=ws&&ts<=we;}).length;
+  const prev=S.snaps.length?S.snaps[S.snaps.length-1]:null;
+  const delta=(curr,pv)=>pv!=null?`${curr>pv?'↑':curr<pv?'↓':'='} vs semana anterior`:'—';
+
+  // Decide layout: many rows → landscape
+  const manyRows = rows.length > 6 || S.snaps.length > 8;
+  const orientation = manyRows ? 'landscape' : 'portrait';
+
+  const tblRows=rows.map((r,i)=>`<tr style="background:${i%2?'#f8fafc':'#fff'}">
+    <td>${r.title}</td>
+    <td class="vg">${r.v?fmtMp(r.v):'—'}</td>
+    <td class="vr">${r.cu?fmtMp(r.cu):'—'}</td>
+    <td class="va">${r.imp?fmtMp(r.imp):'—'}</td>
+    <td class="vg" style="font-weight:700">${r.liq?fmtMp(r.liq):'—'}</td>
+    <td class="vg">${r.marg}</td>
+    <td style="color:#64748b;font-size:.7em">${r.cotador||r.lances?`${r.cotador}${r.cotador&&r.lances?' / ':''}${r.lances}`:r.src==='auto'?'⚡ Planilha':'✓ Manual'}</td>
+  </tr>`).join('');
+
+  const histRows=[...S.snaps].reverse().map((s,i)=>`<tr style="background:${i%2?'#f8fafc':'#fff'}">
+    <td>${s.wl}</td><td style="text-align:center;font-weight:700">${s.hom}</td>
+    <td class="vg">${fmtMp(s.valor)}</td>
+    <td class="vg">${fmtMp(s.lucro)}</td>
+    <td style="text-align:center">${s.novas}</td>
+    <td style="text-align:center">${s.pipeline}</td>
+  </tr>`).join('');
+
+  const totalRow=rows.length?`<tr style="background:#1a3a5c">
+    <td style="color:#fff;font-weight:700">TOTAL</td>
+    <td style="color:#93c5fd;font-weight:700">${fmtMp(vT)}</td>
+    <td>—</td><td>—</td>
+    <td style="color:#6ee7b7;font-weight:700">${fmtMp(lT)}</td>
+    <td style="color:#6ee7b7;font-weight:700">${vT>0?(lT/vT*100).toFixed(1)+'%':'—'}</td>
+    <td></td>
+  </tr>`:'';
+
   const pa=document.getElementById('printArea');
   pa.style.display='block';
   pa.innerHTML=`<style>
-    @page{margin:1.5cm}
-    body{font-family:'Outfit',Arial,sans-serif;font-size:11px;color:#111;margin:0}
-    h1{font-family:Georgia,serif;font-size:20px;color:#1a3a5c;margin-bottom:4px;border-bottom:2px solid #3b82f6;padding-bottom:6px}
-    h2{font-family:Georgia,serif;font-size:13px;color:#2563eb;margin:14px 0 6px}
-    .meta{font-size:9px;color:#64748b;font-family:monospace;margin-bottom:14px}
-    .krow{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px}
-    .pk{border:1px solid #e2e8f0;border-radius:5px;padding:8px;border-top:3px solid #3b82f6}
-    .pk.g{border-top-color:#10b981}.pk.a{border-top-color:#f59e0b}
-    .pkl{font-size:7px;text-transform:uppercase;letter-spacing:.08em;color:#64748b;font-family:monospace;margin-bottom:3px}
-    .pkv{font-family:Georgia,serif;font-size:16px;color:#1e293b;line-height:1}
-    .pks{font-size:7px;color:#94a3b8;font-family:monospace;margin-top:2px}
-    table{width:100%;border-collapse:collapse;margin-top:4px;font-size:9px}
-    thead th{background:#1a3a5c;color:#fff;padding:5px 8px;text-align:left;font-family:monospace;font-size:7.5px;text-transform:uppercase;letter-spacing:.05em}
-    tbody tr:nth-child(even){background:#f8fafc}
-    tbody td{padding:5px 8px;border-bottom:1px solid #e2e8f0}
-    .vg{color:#059669;font-family:monospace}.vr{color:#dc2626;font-family:monospace}.va{color:#d97706;font-family:monospace}
-    .ft{margin-top:12px;padding-top:6px;border-top:1px solid #e2e8f0;font-size:7px;color:#94a3b8;font-family:monospace;display:flex;justify-content:space-between}
-  </style>${content}`;
-  setTimeout(()=>{window.print();setTimeout(()=>{pa.style.display='none';pa.innerHTML='';},800);},150);
+    @page{ size:A4 ${orientation}; margin:1.2cm; }
+    *{ box-sizing:border-box; }
+    body{ font-family:'Outfit',Arial,sans-serif; font-size:13px; color:#111; margin:0; background:#fff; }
+    .pg{ max-width:100%; }
+    h1{ font-family:Georgia,serif; font-size:24px; color:#1a3a5c; margin:0 0 4px;
+        border-bottom:3px solid #3b82f6; padding-bottom:8px; }
+    h2{ font-family:Georgia,serif; font-size:16px; color:#2563eb; margin:18px 0 8px; }
+    .meta{ font-size:11px; color:#64748b; font-family:monospace; margin-bottom:16px; }
+    .krow{ display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-bottom:18px; }
+    .pk{ border:1px solid #e2e8f0; border-radius:6px; padding:10px 12px; border-top:4px solid #3b82f6; }
+    .pk.g{ border-top-color:#10b981; }
+    .pk.a{ border-top-color:#f59e0b; }
+    .pkl{ font-size:9px; text-transform:uppercase; letter-spacing:.1em; color:#64748b;
+          font-family:monospace; margin-bottom:5px; }
+    .pkv{ font-family:Georgia,serif; font-size:22px; color:#1e293b; line-height:1; }
+    .pks{ font-size:10px; color:#94a3b8; font-family:monospace; margin-top:3px; }
+    table{ width:100%; border-collapse:collapse; margin-top:6px; font-size:12px; }
+    thead th{ background:#1a3a5c; color:#fff; padding:8px 10px; text-align:left;
+              font-family:monospace; font-size:10px; text-transform:uppercase; letter-spacing:.05em; }
+    tbody td{ padding:7px 10px; border-bottom:1px solid #e2e8f0; vertical-align:middle; }
+    .vg{ color:#059669; font-family:monospace; }
+    .vr{ color:#dc2626; font-family:monospace; }
+    .va{ color:#d97706; font-family:monospace; }
+    .ft{ margin-top:16px; padding-top:8px; border-top:1px solid #e2e8f0;
+         font-size:10px; color:#94a3b8; font-family:monospace;
+         display:flex; justify-content:space-between; }
+  </style>
+  <div class="pg">
+    <h1>Relatório Semanal de Licitações</h1>
+    <div class="meta">Semana: ${wl} &nbsp;·&nbsp; Pipeline: ${S.acomp.length} licitações &nbsp;·&nbsp; Homologadas na coluna: ${S.homCards.length}</div>
+    <div class="krow">
+      <div class="pk"><div class="pkl">Homologações</div><div class="pkv">${hom}</div><div class="pks">${delta(hom,prev?.hom)}</div></div>
+      <div class="pk g"><div class="pkl">Valor de Contratos</div><div class="pkv">${fmtMp(vT)}</div><div class="pks">${delta(vT,prev?.valor)}</div></div>
+      <div class="pk g"><div class="pkl">Lucro Líquido</div><div class="pkv">${fmtMp(lT)}</div><div class="pks">${delta(lT,prev?.lucro)}</div></div>
+      <div class="pk a"><div class="pkl">Novas no Pipeline</div><div class="pkv">${novas}</div><div class="pks">${delta(novas,prev?.novas)}</div></div>
+    </div>
+    ${rows.length?`
+    <h2>Homologações da Semana</h2>
+    <table>
+      <thead><tr><th>Licitação</th><th>Contrato</th><th>Custo</th><th>Imposto 7%</th><th>Lucro Líquido</th><th>Margem</th><th>Responsável</th></tr></thead>
+      <tbody>${tblRows}${totalRow}</tbody>
+    </table>`:'<p style="color:#94a3b8;font-family:monospace;font-size:12px;margin-top:8px">Nenhuma homologação registrada nesta semana.</p>'}
+    ${S.snaps.length?`
+    <h2>Histórico de Snapshots</h2>
+    <table>
+      <thead><tr><th>Semana</th><th style="text-align:center">Homolog.</th><th>Contratos</th><th>Lucro Líq.</th><th style="text-align:center">Novas</th><th style="text-align:center">Pipeline</th></tr></thead>
+      <tbody>${histRows}</tbody>
+    </table>`:''}
+    <div class="ft">
+      <span>Mabus Empresarial LTDA &nbsp;·&nbsp; Jaborandi, SP</span>
+      <span>Semana: ${wl}</span>
+    </div>
+  </div>`;
+
+  setTimeout(()=>{
+    window.print();
+    setTimeout(()=>{ pa.style.display='none'; pa.innerHTML=''; }, 1000);
+  }, 200);
 }
 
 // ═══════════════════════════════════════
@@ -1055,60 +1251,85 @@ function toast(msg,ok=false){const t=document.getElementById('toast');t.textCont
 //  SAVE / LOAD PROGRESS
 // ═══════════════════════════════════════
 // ═══════════════════════════════════════
-//  SAVE — localStorage (funciona no Cloudflare)
+//  SAVE — com verificação real
 // ═══════════════════════════════════════
 let __htmlSource__ = null;
 
 function saveProgress(){
-  // Tenta localStorage primeiro (Cloudflare Pages / qualquer https://)
+  const data = { fin:S.fin, snaps:S.snaps, weekOffset:S.weekOffset };
+  const json = JSON.stringify(data);
+  const fins = Object.keys(S.fin).length;
+  const snaps = S.snaps.length;
+  const kb = (json.length/1024).toFixed(1);
+
+  // 1. Tenta localStorage com verificação real
+  let lsOk = false;
   try{
-    persist();
+    localStorage.setItem(SK, json);
+    const check = localStorage.getItem(SK);
+    lsOk = !!check && check.length === json.length;
+  }catch(e){ lsOk = false; }
+
+  if(lsOk){
     const btn = document.querySelector('[onclick="saveProgress()"]');
     if(btn){
       const orig = btn.innerHTML;
       btn.innerHTML = '✓ Salvo!';
       btn.style.cssText += ';background:var(--gn);border-color:var(--gn);color:#fff';
-      setTimeout(()=>{ btn.innerHTML=orig; btn.style.background='';btn.style.borderColor='';btn.style.color=''; }, 2200);
+      setTimeout(()=>{ btn.innerHTML=orig; btn.style.background='';btn.style.borderColor='';btn.style.color=''; }, 2500);
     }
-    toast('Progresso salvo! Seus dados estão seguros no navegador.', true);
+    toast(`✓ ${fins} registros · ${snaps} snapshots · ${kb}KB salvos no navegador`, true);
     return;
-  }catch(e){}
+  }
 
-  // Fallback: reescreve o arquivo HTML (para uso via file://)
-  const payload = JSON.stringify({
-    fin:S.fin, snaps:S.snaps, weekOffset:S.weekOffset,
-    savedAt:new Date().toISOString()
-  });
+  // 2. localStorage falhou — baixa arquivo com dados embutidos
+  toast('localStorage indisponível — baixando arquivo com dados salvos...', false);
 
   function doSave(html){
     const updated = html.replace(
       /const __SAVED_DATA__ = [\s\S]*?; \/\/ MABUS_DATA_PLACEHOLDER/,
-      `const __SAVED_DATA__ = ${payload}; // MABUS_DATA_PLACEHOLDER`
+      `const __SAVED_DATA__ = ${JSON.stringify(data)}; // MABUS_DATA_PLACEHOLDER`
     );
+    if(!updated.includes('MABUS_DATA_PLACEHOLDER')){
+      toast('Erro interno — contate o suporte.'); return;
+    }
+    __htmlSource__ = updated;
     const blob = new Blob([updated],{type:'text/html;charset=utf-8'});
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = 'Monitor_Licitacoes_Mabus_v4.html';
+    a.download = 'index.html';
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
     URL.revokeObjectURL(a.href);
-    __htmlSource__ = updated;
-    toast('Arquivo salvo! Substitua o HTML antigo pelo novo baixado.', true);
+    toast(`✓ Arquivo baixado com ${fins} registros salvos. Substitua no GitHub.`, true);
   }
 
   if(__htmlSource__){ doSave(__htmlSource__); return; }
 
-  // Pede o arquivo via input como último recurso
+  // Precisa ler o arquivo fonte — abre seletor
   const inp = document.createElement('input');
   inp.type='file'; inp.accept='.html';
   inp.onchange = e => {
-    const f = e.target.files[0]; if(!f)return;
+    const f = e.target.files[0]; if(!f) return;
     const r = new FileReader();
-    r.onload = ev => { __htmlSource__=ev.target.result; doSave(__htmlSource__); };
-    r.readAsText(f,'utf-8');
+    r.onload = ev => { __htmlSource__ = ev.target.result; doSave(__htmlSource__); };
+    r.readAsText(f, 'utf-8');
   };
   inp.click();
-  toast('Selecione o arquivo Monitor_Licitacoes_Mabus_v4.html para salvar.');
+  toast('Selecione o arquivo index.html para embutir os dados.');
 }
+
+// Diagnóstico de localStorage — roda ao abrir
+(function diagStorage(){
+  try{
+    const testKey = '__mabus_test__';
+    localStorage.setItem(testKey, '1');
+    const ok = localStorage.getItem(testKey) === '1';
+    localStorage.removeItem(testKey);
+    if(!ok) setTimeout(()=>toast('⚠️ localStorage não está persistindo — use Salvar para backup em arquivo.'), 2000);
+  }catch(e){
+    setTimeout(()=>toast('⚠️ Armazenamento bloqueado. Verifique: chrome://settings/cookies'), 2000);
+  }
+})();
 
 // ═══════════════════════════════════════
 //  MENSAGEM SEMANAL
