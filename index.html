@@ -467,19 +467,22 @@ let modalId=null, charts={};
 //  SAVE STATE — localStorage puro
 // ═══════════════════════════════════════
 function persist(){
-  try{
-    localStorage.setItem(SK, JSON.stringify({
-      fin: S.fin,
-      snaps: S.snaps,
-      weekOffset: S.weekOffset
-    }));
-  }catch(e){ console.warn('persist error:', e); }
+  const payload = JSON.stringify({
+    fin: S.fin,
+    snaps: S.snaps,
+    weekOffset: S.weekOffset
+  });
+  try{ localStorage.setItem(SK, payload); }catch(e){}
+  try{ sessionStorage.setItem(SK, payload); }catch(e){}
 }
 
 function loadState(){
+  // Tenta localStorage primeiro, fallback sessionStorage
+  let raw = null;
+  try{ raw = localStorage.getItem(SK); }catch(e){}
+  if(!raw){ try{ raw = sessionStorage.getItem(SK); }catch(e){} }
+  if(!raw) return;
   try{
-    const raw = localStorage.getItem(SK);
-    if(!raw) return;
     const d = JSON.parse(raw);
     S.fin = d.fin || {};
     S.snaps = d.snaps || [];
@@ -489,12 +492,12 @@ function loadState(){
 
 function saveProgress(){
   persist();
-  // Confirma que gravou
-  const check = localStorage.getItem(SK);
-  const ok = !!check;
+  let ok = false;
+  try{ ok = !!localStorage.getItem(SK); }catch(e){}
+  if(!ok){ try{ ok = !!sessionStorage.getItem(SK); }catch(e){} }
+
   const fins = Object.keys(S.fin).length;
   const snaps = S.snaps.length;
-
   const btn = document.querySelector('[onclick="saveProgress()"]');
   if(btn){
     const orig = btn.innerHTML;
@@ -502,20 +505,13 @@ function saveProgress(){
     btn.style.cssText += ok
       ? ';background:var(--gn);border-color:var(--gn);color:#fff'
       : ';background:var(--rd);border-color:var(--rd);color:#fff';
-    setTimeout(()=>{
-      btn.innerHTML = orig;
-      btn.style.background = '';
-      btn.style.borderColor = '';
-      btn.style.color = '';
-    }, 2500);
+    setTimeout(()=>{ btn.innerHTML=orig; btn.style.background=''; btn.style.borderColor=''; btn.style.color=''; }, 2500);
   }
-
-  if(ok){
-    toast(`✓ Save State — ${fins} registros · ${snaps} snapshots`, true);
-  } else {
-    toast('Erro ao salvar. Verifique as configurações do navegador.');
-  }
+  toast(ok ? `✓ Save State — ${fins} registros · ${snaps} snapshots` : '✗ Erro ao salvar', ok);
 }
+
+// Auto-save ao fechar/recarregar a página
+window.addEventListener('beforeunload', ()=>{ try{ persist(); }catch(e){} });
 
 // Carrega estado salvo ao iniciar
 loadState();
@@ -769,22 +765,28 @@ function renderInfoGraphic(){
     return;
   }
 
-  const W=el.offsetWidth||800, H=180;
-  const PAD={top:20,right:24,bottom:48,left:56};
-  const cW=W-PAD.left-PAD.right, cH=H-PAD.top-PAD.bottom;
+  const W=Math.max(el.offsetWidth||800, 400);
+  const H=200;
+  const PAD={top:28,right:28,bottom:44,left:62};
+  const cW=W-PAD.left-PAD.right;
+  const cH=H-PAD.top-PAD.bottom;
   const n=data.length;
+
+  // Safe X — avoid division by zero when n=1
+  const xPos=i=> n===1 ? PAD.left+cW/2 : PAD.left+(i/(n-1))*cW;
+
+  // Separate scales for contratos and lucro so they don't overlap
   const maxV=Math.max(...data.map(d=>d.valor),1);
   const maxL=Math.max(...data.map(d=>d.lucro),1);
-  const maxAll=Math.max(maxV,maxL);
+  const yV=v=>PAD.top+cH-(v/maxV)*cH;
+  const yL=v=>PAD.top+cH-(v/maxL)*cH;
 
-  // X positions (evenly spaced)
-  const xPos=i=>PAD.left+(i/(n-1))*cW;
-  const yV=v=>PAD.top+cH-(v/maxAll)*cH;
-  const yL=v=>PAD.top+cH-(v/maxAll)*cH;
-
-  // Build smooth mountain path (cubic bezier)
+  // Smooth bezier mountain path
   function mountainPath(vals,yFn){
-    if(vals.length===1) return `M${PAD.left},${yFn(vals[0])}`;
+    if(vals.length===1){
+      const x=xPos(0),y=yFn(vals[0]);
+      return `M${x-1},${y} L${x+1},${y}`;
+    }
     let d=`M${xPos(0)},${yFn(vals[0])}`;
     for(let i=1;i<vals.length;i++){
       const x0=xPos(i-1),y0=yFn(vals[i-1]);
@@ -797,90 +799,73 @@ function renderInfoGraphic(){
 
   function areaPath(vals,yFn){
     const base=PAD.top+cH;
+    if(vals.length===1){
+      const x=xPos(0);
+      return `M${x},${yFn(vals[0])} L${x},${base}`;
+    }
     return mountainPath(vals,yFn)+` L${xPos(vals.length-1)},${base} L${xPos(0)},${base} Z`;
   }
 
   const vVals=data.map(d=>d.valor);
   const lVals=data.map(d=>d.lucro);
 
-  // Y axis labels
+  // Y axis — use maxV scale (primary)
   const yTicks=[0,0.25,0.5,0.75,1].map(t=>({
     y:PAD.top+cH-t*cH,
-    label:'R$'+(maxAll*t>=1000000?((maxAll*t)/1000000).toFixed(1)+'M':((maxAll*t)/1000).toFixed(0)+'k')
+    label:'R$'+(maxV*t>=1000000?((maxV*t)/1000000).toFixed(1)+'M':(maxV*t/1000).toFixed(0)+'k')
   }));
-
-  // Grid lines
   const gridLines=yTicks.map(t=>`<line x1="${PAD.left}" y1="${t.y}" x2="${W-PAD.right}" y2="${t.y}" stroke="#1e2d4a" stroke-width="1"/>`).join('');
   const yLabels=yTicks.map(t=>`<text x="${PAD.left-6}" y="${t.y+4}" text-anchor="end" fill="#475569" font-size="9" font-family="DM Mono,monospace">${t.label}</text>`).join('');
 
-  // X labels + vertical markers
+  // X labels
   const xLabels=data.map((d,i)=>{
-    const x=xPos(i);
-    const isCurr=!!d._current;
-    return `
-      <line x1="${x}" y1="${PAD.top}" x2="${x}" y2="${PAD.top+cH}" stroke="${isCurr?'#3b82f6':'#1e2d4a'}" stroke-width="${isCurr?1.5:1}" stroke-dasharray="${isCurr?'':'3,3'}"/>
-      <text x="${x}" y="${H-6}" text-anchor="middle" fill="${isCurr?'#60a5fa':'#475569'}" font-size="9" font-family="DM Mono,monospace">${d.wl}</text>
-    `;
+    const x=xPos(i),isCurr=!!d._current;
+    return `<line x1="${x}" y1="${PAD.top}" x2="${x}" y2="${PAD.top+cH}" stroke="${isCurr?'rgba(59,130,246,.4)':'#1e2d4a'}" stroke-width="${isCurr?1.5:1}" stroke-dasharray="${isCurr?'':'3,3'}"/>
+    <text x="${x}" y="${H-6}" text-anchor="middle" fill="${isCurr?'#60a5fa':'#475569'}" font-size="9" font-family="DM Mono,monospace">${d.wl}</text>`;
   }).join('');
 
-  // Peaks: dots + value labels
+  // Dots + value labels — offset lucro labels UP to avoid overlap
   const vDots=data.map((d,i)=>{
-    const x=xPos(i),y=yV(d.valor);
-    const label=fmtM(d.valor);
-    const isCurr=!!d._current;
-    return `
-      <circle cx="${x}" cy="${y}" r="${isCurr?5:4}" fill="${isCurr?'#60a5fa':'#3b82f6'}" stroke="#0a0e1a" stroke-width="2"/>
-      <text x="${x}" y="${y-9}" text-anchor="middle" fill="#60a5fa" font-size="8.5" font-family="DM Mono,monospace" font-weight="bold">${label}</text>
-    `;
+    const x=xPos(i),y=yV(d.valor),isCurr=!!d._current;
+    return `<circle cx="${x}" cy="${y}" r="${isCurr?5:4}" fill="${isCurr?'#60a5fa':'#3b82f6'}" stroke="#0a0e1a" stroke-width="2"/>
+    <text x="${x}" y="${y-10}" text-anchor="middle" fill="#60a5fa" font-size="8.5" font-family="DM Mono,monospace" font-weight="bold">${fmtM(d.valor)}</text>`;
   }).join('');
 
   const lDots=data.map((d,i)=>{
-    const x=xPos(i),y=yL(d.lucro);
-    const label=fmtM(d.lucro);
-    const isCurr=!!d._current;
-    return `
-      <circle cx="${x}" cy="${y}" r="${isCurr?5:4}" fill="${isCurr?'#34d399':'#10b981'}" stroke="#0a0e1a" stroke-width="2"/>
-      <text x="${x}" y="${y-9}" text-anchor="middle" fill="#10b981" font-size="8.5" font-family="DM Mono,monospace">${label}</text>
-    `;
+    const x=xPos(i),y=yL(d.lucro),isCurr=!!d._current;
+    return `<circle cx="${x}" cy="${y}" r="${isCurr?5:4}" fill="${isCurr?'#34d399':'#10b981'}" stroke="#0a0e1a" stroke-width="2"/>
+    <text x="${x}" y="${y+18}" text-anchor="middle" fill="#10b981" font-size="8.5" font-family="DM Mono,monospace">${fmtM(d.lucro)}</text>`;
   }).join('');
 
-  // Trend arrow between last two points
+  // Trend badge
   let trendBadge='';
   if(data.length>=2){
     const last=data[data.length-1],prev2=data[data.length-2];
     const diff=last.valor-prev2.valor;
-    const pct=prev2.valor>0?((diff/prev2.valor)*100).toFixed(0):0;
+    const pct=prev2.valor>0?Math.abs((diff/prev2.valor)*100).toFixed(0):'—';
     const col=diff>=0?'#10b981':'#ef4444';
     const arrow=diff>=0?'▲':'▼';
-    trendBadge=`<rect x="${W-PAD.right-80}" y="${PAD.top}" width="76" height="20" rx="4" fill="${diff>=0?'rgba(16,185,129,.15)':'rgba(239,68,68,.15)'}" stroke="${col}" stroke-width="1"/>
-    <text x="${W-PAD.right-42}" y="${PAD.top+13}" text-anchor="middle" fill="${col}" font-size="10" font-family="DM Mono,monospace" font-weight="bold">${arrow} ${Math.abs(pct)}% contratos</text>`;
+    trendBadge=`<rect x="${W-PAD.right-88}" y="${PAD.top}" width="84" height="20" rx="4" fill="${diff>=0?'rgba(16,185,129,.12)':'rgba(239,68,68,.12)'}" stroke="${col}" stroke-width="1"/>
+    <text x="${W-PAD.right-46}" y="${PAD.top+13}" text-anchor="middle" fill="${col}" font-size="10" font-family="DM Mono,monospace" font-weight="bold">${arrow} ${pct}% contratos</text>`;
   }
 
-  el.innerHTML=`<svg width="100%" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="display:block">
+  el.innerHTML=`<svg width="100%" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="display:block;overflow:visible">
     <defs>
       <linearGradient id="gradV" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="#3b82f6" stop-opacity="0.4"/>
+        <stop offset="0%" stop-color="#3b82f6" stop-opacity="0.35"/>
         <stop offset="100%" stop-color="#3b82f6" stop-opacity="0.02"/>
       </linearGradient>
       <linearGradient id="gradL" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="#10b981" stop-opacity="0.45"/>
+        <stop offset="0%" stop-color="#10b981" stop-opacity="0.35"/>
         <stop offset="100%" stop-color="#10b981" stop-opacity="0.02"/>
       </linearGradient>
     </defs>
-    ${gridLines}
-    ${xLabels}
-    ${yLabels}
-    <!-- Área contratos -->
+    ${gridLines}${xLabels}${yLabels}
     <path d="${areaPath(vVals,yV)}" fill="url(#gradV)"/>
-    <!-- Linha contratos -->
     <path d="${mountainPath(vVals,yV)}" fill="none" stroke="#3b82f6" stroke-width="2.5" stroke-linejoin="round"/>
-    <!-- Área lucro -->
     <path d="${areaPath(lVals,yL)}" fill="url(#gradL)"/>
-    <!-- Linha lucro -->
     <path d="${mountainPath(lVals,yL)}" fill="none" stroke="#10b981" stroke-width="2" stroke-linejoin="round"/>
-    ${vDots}
-    ${lDots}
-    ${trendBadge}
+    ${vDots}${lDots}${trendBadge}
   </svg>`;
 }
 
