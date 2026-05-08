@@ -463,49 +463,62 @@ let S={
 };
 let modalId=null, charts={};
 
-// ── DADOS EMBUTIDOS NO ARQUIVO ──
-const __SAVED_DATA__ = null; // MABUS_DATA_PLACEHOLDER
-
-// Inicializa: prefere localStorage (funciona no Cloudflare), fallback para dados embutidos
-(()=>{
-  // Teste de localStorage
-  try{
-    localStorage.setItem('__test__','1');
-    localStorage.removeItem('__test__');
-  }catch(e){
-    console.error('localStorage BLOQUEADO:', e);
-    // Mostra aviso após carregamento
-    setTimeout(()=>toast('⚠️ Armazenamento bloqueado — verifique configurações do Chrome'), 1500);
-  }
-
-  try{
-    const ls = localStorage.getItem(SK);
-    if(ls){
-      const d = JSON.parse(ls);
-      S.fin = d.fin||{};
-      S.snaps = d.snaps||[];
-      if(d.weekOffset!==undefined) S.weekOffset = d.weekOffset;
-      console.log(`✓ Dados carregados do localStorage: ${Object.keys(S.fin).length} registros financeiros, ${S.snaps.length} snapshots`);
-      return;
-    }
-  }catch(e){ console.warn('Erro ao ler localStorage:', e); }
-
-  // Fallback: dados embutidos (para uso via file://)
-  try{
-    if(__SAVED_DATA__){
-      S.fin = __SAVED_DATA__.fin||{};
-      S.snaps = __SAVED_DATA__.snaps||[];
-      if(__SAVED_DATA__.weekOffset!==undefined) S.weekOffset = __SAVED_DATA__.weekOffset;
-      console.log('✓ Dados carregados do arquivo embutido');
-    }
-  }catch(e){}
-})();
-
+// ═══════════════════════════════════════
+//  SAVE STATE — localStorage puro
+// ═══════════════════════════════════════
 function persist(){
   try{
-    localStorage.setItem(SK, JSON.stringify({ fin:S.fin, snaps:S.snaps, weekOffset:S.weekOffset }));
-  }catch(e){ console.warn('localStorage indisponível:', e); }
+    localStorage.setItem(SK, JSON.stringify({
+      fin: S.fin,
+      snaps: S.snaps,
+      weekOffset: S.weekOffset
+    }));
+  }catch(e){ console.warn('persist error:', e); }
 }
+
+function loadState(){
+  try{
+    const raw = localStorage.getItem(SK);
+    if(!raw) return;
+    const d = JSON.parse(raw);
+    S.fin = d.fin || {};
+    S.snaps = d.snaps || [];
+    if(d.weekOffset !== undefined) S.weekOffset = d.weekOffset;
+  }catch(e){ console.warn('loadState error:', e); }
+}
+
+function saveProgress(){
+  persist();
+  // Confirma que gravou
+  const check = localStorage.getItem(SK);
+  const ok = !!check;
+  const fins = Object.keys(S.fin).length;
+  const snaps = S.snaps.length;
+
+  const btn = document.querySelector('[onclick="saveProgress()"]');
+  if(btn){
+    const orig = btn.innerHTML;
+    btn.innerHTML = ok ? '✓ Salvo!' : '✗ Erro';
+    btn.style.cssText += ok
+      ? ';background:var(--gn);border-color:var(--gn);color:#fff'
+      : ';background:var(--rd);border-color:var(--rd);color:#fff';
+    setTimeout(()=>{
+      btn.innerHTML = orig;
+      btn.style.background = '';
+      btn.style.borderColor = '';
+      btn.style.color = '';
+    }, 2500);
+  }
+
+  if(ok){
+    toast(`✓ Save State — ${fins} registros · ${snaps} snapshots`, true);
+  } else {
+    toast('Erro ao salvar. Verifique as configurações do navegador.');
+  }
+}
+
+// Carrega estado salvo ao iniciar
+loadState();
 
 // ═══════════════════════════════════════
 //  WEEK NAVIGATION
@@ -1248,89 +1261,6 @@ function fmtMp(v){if(!v&&v!==0)return'—';return new Intl.NumberFormat('pt-BR',
 function toast(msg,ok=false){const t=document.getElementById('toast');t.textContent=msg;t.className='toast'+(ok?' ok':'');t.classList.add('show');setTimeout(()=>t.classList.remove('show'),3200);}
 
 // ═══════════════════════════════════════
-//  SAVE / LOAD PROGRESS
-// ═══════════════════════════════════════
-// ═══════════════════════════════════════
-//  SAVE — com verificação real
-// ═══════════════════════════════════════
-let __htmlSource__ = null;
-
-function saveProgress(){
-  const data = { fin:S.fin, snaps:S.snaps, weekOffset:S.weekOffset };
-  const json = JSON.stringify(data);
-  const fins = Object.keys(S.fin).length;
-  const snaps = S.snaps.length;
-  const kb = (json.length/1024).toFixed(1);
-
-  // 1. Tenta localStorage com verificação real
-  let lsOk = false;
-  try{
-    localStorage.setItem(SK, json);
-    const check = localStorage.getItem(SK);
-    lsOk = !!check && check.length === json.length;
-  }catch(e){ lsOk = false; }
-
-  if(lsOk){
-    const btn = document.querySelector('[onclick="saveProgress()"]');
-    if(btn){
-      const orig = btn.innerHTML;
-      btn.innerHTML = '✓ Salvo!';
-      btn.style.cssText += ';background:var(--gn);border-color:var(--gn);color:#fff';
-      setTimeout(()=>{ btn.innerHTML=orig; btn.style.background='';btn.style.borderColor='';btn.style.color=''; }, 2500);
-    }
-    toast(`✓ ${fins} registros · ${snaps} snapshots · ${kb}KB salvos no navegador`, true);
-    return;
-  }
-
-  // 2. localStorage falhou — baixa arquivo com dados embutidos
-  toast('localStorage indisponível — baixando arquivo com dados salvos...', false);
-
-  function doSave(html){
-    const updated = html.replace(
-      /const __SAVED_DATA__ = [\s\S]*?; \/\/ MABUS_DATA_PLACEHOLDER/,
-      `const __SAVED_DATA__ = ${JSON.stringify(data)}; // MABUS_DATA_PLACEHOLDER`
-    );
-    if(!updated.includes('MABUS_DATA_PLACEHOLDER')){
-      toast('Erro interno — contate o suporte.'); return;
-    }
-    __htmlSource__ = updated;
-    const blob = new Blob([updated],{type:'text/html;charset=utf-8'});
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'index.html';
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    URL.revokeObjectURL(a.href);
-    toast(`✓ Arquivo baixado com ${fins} registros salvos. Substitua no GitHub.`, true);
-  }
-
-  if(__htmlSource__){ doSave(__htmlSource__); return; }
-
-  // Precisa ler o arquivo fonte — abre seletor
-  const inp = document.createElement('input');
-  inp.type='file'; inp.accept='.html';
-  inp.onchange = e => {
-    const f = e.target.files[0]; if(!f) return;
-    const r = new FileReader();
-    r.onload = ev => { __htmlSource__ = ev.target.result; doSave(__htmlSource__); };
-    r.readAsText(f, 'utf-8');
-  };
-  inp.click();
-  toast('Selecione o arquivo index.html para embutir os dados.');
-}
-
-// Diagnóstico de localStorage — roda ao abrir
-(function diagStorage(){
-  try{
-    const testKey = '__mabus_test__';
-    localStorage.setItem(testKey, '1');
-    const ok = localStorage.getItem(testKey) === '1';
-    localStorage.removeItem(testKey);
-    if(!ok) setTimeout(()=>toast('⚠️ localStorage não está persistindo — use Salvar para backup em arquivo.'), 2000);
-  }catch(e){
-    setTimeout(()=>toast('⚠️ Armazenamento bloqueado. Verifique: chrome://settings/cookies'), 2000);
-  }
-})();
-
 // ═══════════════════════════════════════
 //  MENSAGEM SEMANAL
 // ═══════════════════════════════════════
@@ -1453,7 +1383,10 @@ function copiarMensagem(){
 // ═══════════════════════════════════════
 //  INIT
 // ═══════════════════════════════════════
-refresh();renderSnaps();renderXlList();
+// loadState() já foi chamado na definição do estado acima
+refresh();
+renderSnaps();
+renderXlList();
 </script>
 </body>
 </html>
